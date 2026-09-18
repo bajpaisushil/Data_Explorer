@@ -1,0 +1,483 @@
+@import "tailwindcss";
+
+/* Dark applies for an explicit [data-theme="dark"] stamp, or for OS dark unless
+   the user has explicitly stamped light. The toggle wins in both directions. */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *, :root:not([data-theme="light"])) {
+      @slot;
+    }
+  }
+  &:where([data-theme="dark"] *, [data-theme="dark"]) {
+    @slot;
+  }
+}
+
+/* ---------------------------------------------------------------- tokens */
+/* Chrome is soft: tinted planes, floating cards, generous radii, layered
+   elevation instead of borders. Data colours are a separate concern — the
+   categorical slots below are the validated palette and every adjacent pair
+   clears the CVD and normal-vision floors against these surfaces in both
+   modes. Chrome may be pastel; a series colour may not. */
+
+:root {
+  color-scheme: light;
+
+  /* planes & surfaces */
+  --plane: #f4f2fa;
+  --plane-warm: #fdf3f0;
+  --plane-cool: #eef4fd;
+  --surface-1: #ffffff;
+  --surface-2: #f5f3fc;
+  --surface-3: #ebe7f8;
+  --surface-sunken: #eeebf7;
+  --overlay: rgba(26, 24, 38, 0.28);
+
+  /* ink */
+  --ink-1: #1a1826;
+  --ink-2: #5b5674;
+  --ink-3: #7a7591;
+  --ink-inverse: #ffffff;
+
+  /* hairlines — used sparingly; elevation carries structure instead */
+  --line-1: #ece8f6;
+  --line-2: #ddd7ee;
+  --ring: rgba(26, 24, 38, 0.06);
+
+  /* accent */
+  --accent: #5a63e0;
+  --accent-hover: #4f57d9;
+  --accent-soft: #e4e5fc;
+  --accent-ink: #ffffff;
+  --accent-glow: rgba(90, 99, 224, 0.28);
+
+  /* categorical series, fixed order, never cycled */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  /* sequential ramp, light → dark */
+  --seq-100: #cde2fb;
+  --seq-200: #9ec5f4;
+  --seq-300: #6da7ec;
+  --seq-400: #3987e5;
+  --seq-500: #256abf;
+  --seq-600: #184f95;
+  --seq-700: #0d366b;
+
+  /* status — reserved, never reused as a series, always with an icon + label */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  /* column-kind hues for the type pills */
+  --kind-number: #2a78d6;
+  --kind-string: #4a3aa7;
+  --kind-date: #1baf7a;
+  --kind-bool: #eb6834;
+
+  /* elevation — soft, layered, coloured slightly by the plane's hue */
+  --e0: inset 0 0 0 1px rgba(26, 24, 38, 0.04);
+  --e1: 0 1px 2px rgba(48, 40, 82, 0.05), 0 2px 8px -2px rgba(48, 40, 82, 0.06);
+  --e2: 0 2px 4px rgba(48, 40, 82, 0.06), 0 8px 20px -6px rgba(48, 40, 82, 0.12);
+  --e3: 0 4px 8px rgba(48, 40, 82, 0.07), 0 18px 44px -12px rgba(48, 40, 82, 0.22);
+  --e-press: inset 0 2px 5px rgba(48, 40, 82, 0.16);
+
+  /* the highlight that makes a control read as a physical, pressable thing */
+  --hl-top: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --hl-accent: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+
+  --grad-surface: linear-gradient(180deg, #ffffff 0%, #fbfaff 100%);
+  --grad-accent: linear-gradient(180deg, #6f77e8 0%, #5a63e0 55%, #4f57d9 100%);
+  --grad-plane: radial-gradient(1100px 620px at 12% -10%, #e9f0ff 0%, transparent 62%),
+    radial-gradient(940px 560px at 96% 4%, #ffeef0 0%, transparent 58%),
+    radial-gradient(760px 700px at 48% 110%, #eafaf3 0%, transparent 60%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --plane: #14131a;
+    --plane-warm: #1d1720;
+    --plane-cool: #141a24;
+    --surface-1: #1e1d26;
+    --surface-2: #262532;
+    --surface-3: #31303f;
+    --surface-sunken: #191822;
+    --overlay: rgba(0, 0, 0, 0.62);
+
+    --ink-1: #f4f2fb;
+    --ink-2: #c9c4de;
+    --ink-3: #9a95b3;
+    --ink-inverse: #14131a;
+
+    --line-1: #2c2b38;
+    --line-2: #3a3849;
+    --ring: rgba(255, 255, 255, 0.07);
+
+    --accent: #7c7ff5;
+    --accent-hover: #8b8cf8;
+    --accent-soft: #2e2c52;
+    --accent-ink: #14131a;
+    --accent-glow: rgba(124, 127, 245, 0.34);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+
+    --seq-100: #0d366b;
+    --seq-200: #184f95;
+    --seq-300: #256abf;
+    --seq-400: #3987e5;
+    --seq-500: #5598e7;
+    --seq-600: #9ec5f4;
+    --seq-700: #cde2fb;
+
+    --kind-number: #3987e5;
+    --kind-string: #9085e9;
+    --kind-date: #199e70;
+    --kind-bool: #d95926;
+
+    --e0: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --e1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
+    --e2: 0 2px 4px rgba(0, 0, 0, 0.45), 0 8px 20px -6px rgba(0, 0, 0, 0.6);
+    --e3: 0 4px 8px rgba(0, 0, 0, 0.5), 0 18px 44px -12px rgba(0, 0, 0, 0.75);
+    --e-press: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+
+    --hl-top: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --hl-accent: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+
+    --grad-surface: linear-gradient(180deg, #232230 0%, #1e1d26 100%);
+    --grad-accent: linear-gradient(180deg, #8b8cf8 0%, #7c7ff5 55%, #6d6fe8 100%);
+    --grad-plane: radial-gradient(1100px 620px at 12% -10%, #1b2136 0%, transparent 62%),
+      radial-gradient(940px 560px at 96% 4%, #2a1a28 0%, transparent 58%),
+      radial-gradient(760px 700px at 48% 110%, #132620 0%, transparent 60%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --plane: #14131a;
+  --plane-warm: #1d1720;
+  --plane-cool: #141a24;
+  --surface-1: #1e1d26;
+  --surface-2: #262532;
+  --surface-3: #31303f;
+  --surface-sunken: #191822;
+  --overlay: rgba(0, 0, 0, 0.62);
+
+  --ink-1: #f4f2fb;
+  --ink-2: #c9c4de;
+  --ink-3: #9a95b3;
+  --ink-inverse: #14131a;
+
+  --line-1: #2c2b38;
+  --line-2: #3a3849;
+  --ring: rgba(255, 255, 255, 0.07);
+
+  --accent: #7c7ff5;
+  --accent-hover: #8b8cf8;
+  --accent-soft: #2e2c52;
+  --accent-ink: #14131a;
+  --accent-glow: rgba(124, 127, 245, 0.34);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --seq-100: #0d366b;
+  --seq-200: #184f95;
+  --seq-300: #256abf;
+  --seq-400: #3987e5;
+  --seq-500: #5598e7;
+  --seq-600: #9ec5f4;
+  --seq-700: #cde2fb;
+
+  --kind-number: #3987e5;
+  --kind-string: #9085e9;
+  --kind-date: #199e70;
+  --kind-bool: #d95926;
+
+  --e0: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --e1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.45);
+  --e2: 0 2px 4px rgba(0, 0, 0, 0.45), 0 8px 20px -6px rgba(0, 0, 0, 0.6);
+  --e3: 0 4px 8px rgba(0, 0, 0, 0.5), 0 18px 44px -12px rgba(0, 0, 0, 0.75);
+  --e-press: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+
+  --hl-top: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --hl-accent: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+
+  --grad-surface: linear-gradient(180deg, #232230 0%, #1e1d26 100%);
+  --grad-accent: linear-gradient(180deg, #8b8cf8 0%, #7c7ff5 55%, #6d6fe8 100%);
+  --grad-plane: radial-gradient(1100px 620px at 12% -10%, #1b2136 0%, transparent 62%),
+    radial-gradient(940px 560px at 96% 4%, #2a1a28 0%, transparent 58%),
+    radial-gradient(760px 700px at 48% 110%, #132620 0%, transparent 60%);
+}
+
+/* ------------------------------------------------- tailwind theme bridge */
+/* `inline` emits var() into the utilities, so the cascade above decides the
+   value in each theme rather than baking one in at build time. */
+
+@theme inline {
+  --color-plane: var(--plane);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-sunken: var(--surface-sunken);
+
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-inverse: var(--ink-inverse);
+
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
+
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+
+  --color-kind-number: var(--kind-number);
+  --color-kind-string: var(--kind-string);
+  --color-kind-date: var(--kind-date);
+  --color-kind-bool: var(--kind-bool);
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1.05rem;
+
+  /* generous, consistent softness */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.375rem;
+  --radius-2xl: 1.75rem;
+
+  --shadow-e1: var(--e1);
+  --shadow-e2: var(--e2);
+  --shadow-e3: var(--e3);
+}
+
+/* ------------------------------------------------------------------ base */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--plane);
+  background-image: var(--grad-plane);
+  background-attachment: fixed;
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+/* Figures line up when they sit in columns. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* ------------------------------------------------------------ components */
+
+/* A floating card: elevation and a whisper of an edge, never a hard border. */
+.df-card {
+  background-image: var(--grad-surface);
+  background-color: var(--surface-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--e1), var(--e0);
+}
+
+.df-card-raised {
+  background-image: var(--grad-surface);
+  background-color: var(--surface-1);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--e2), var(--e0);
+}
+
+/* A control that reads as physically pressable: top highlight, soft drop
+   shadow at rest, sinking into the surface on press. */
+.df-press {
+  position: relative;
+  box-shadow: var(--e1), var(--hl-top);
+  transition:
+    transform 0.12s cubic-bezier(0.2, 0.8, 0.3, 1),
+    box-shadow 0.12s ease,
+    background-color 0.12s ease,
+    filter 0.12s ease;
+}
+.df-press:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--e2), var(--hl-top);
+}
+.df-press:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--e-press);
+}
+
+.df-press-accent {
+  box-shadow:
+    var(--e1),
+    0 4px 14px -4px var(--accent-glow),
+    var(--hl-accent);
+}
+.df-press-accent:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    var(--e2),
+    0 8px 22px -6px var(--accent-glow),
+    var(--hl-accent);
+}
+.df-press-accent:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--e-press);
+}
+
+/* A pastel wash derived from any hue — badges, chips, selected pills. */
+.df-tint {
+  background-color: color-mix(in oklab, var(--tint-hue, var(--accent)) 14%, var(--surface-1));
+  color: color-mix(in oklab, var(--tint-hue, var(--accent)) 72%, var(--ink-1));
+}
+
+/* Recessed well for inputs and scroll regions. */
+.df-sunken {
+  background-color: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 3px rgba(48, 40, 82, 0.08), var(--e0);
+}
+:root[data-theme="dark"] .df-sunken,
+:root:not([data-theme="light"]) .df-sunken {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45), var(--e0);
+}
+
+/* --------------------------------------------------------- scroll & motion */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes df-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes df-fade-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes df-pop {
+  0% { opacity: 0; transform: scale(0.94); }
+  60% { transform: scale(1.015); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes df-shimmer {
+  0% { background-position: -480px 0; }
+  100% { background-position: 480px 0; }
+}
+@keyframes df-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.df-spin { animation: df-spin 0.8s linear infinite; }
+.df-in { animation: df-fade-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.df-pop { animation: df-pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.df-float { animation: df-float 5s ease-in-out infinite; }
+
+.df-skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-3) 45%,
+    var(--surface-2) 90%
+  );
+  background-size: 480px 100%;
+  border-radius: 999px;
+  animation: df-shimmer 1.3s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .df-press:hover:not(:disabled),
+  .df-press:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+@keyframes df-indeterminate {
+  0% { margin-left: -40%; }
+  100% { margin-left: 100%; }
+}
