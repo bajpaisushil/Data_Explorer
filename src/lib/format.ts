@@ -200,6 +200,16 @@ export function slugify(s: string): string {
   return base || 'column'
 }
 
+/**
+ * A sparkline over a near-unique column (order ids, session ids) is 24 equal
+ * bars — it looks like data but says nothing. Only draw one when the column
+ * actually has a shape worth showing.
+ */
+export function hasUsefulDistribution(kind: ColumnKind, distinctCount: number): boolean {
+  if (kind !== 'string') return true
+  return distinctCount >= 0 && distinctCount <= 100
+}
+
 export function pluralize(n: number, one: string, many?: string): string {
   return n === 1 ? one : (many ?? `${one}s`)
 }

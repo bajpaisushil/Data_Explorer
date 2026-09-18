@@ -214,6 +214,9 @@ export function drawChart(
   }
   if (!Number.isFinite(max)) max = 1
   if (max === min) max = min + 1
+  // Headroom, so the tallest mark and its value label do not collide with the
+  // top edge of the plot.
+  max += (max - min) * 0.08
 
   drawYAxis(ctx, theme, plot, min, max)
 
@@ -249,7 +252,10 @@ function drawBars(
   const slot = plot.width / Math.max(1, n)
   // A 2px gap of surface colour between adjacent bars keeps fills separable.
   const gap = histogram ? 2 : Math.min(10, Math.max(2, slot * 0.22))
-  const barW = Math.max(1, slot - gap)
+  // With only two or three categories a full-width bar reads as a slab, so the
+  // mark is capped and centred in its slot instead.
+  const barW = Math.max(1, Math.min(slot - gap, histogram ? slot : 72))
+  const barPad = (slot - barW) / 2
   const baseline = scaleY(Math.max(0, min))
 
   const hits: HitPoint[] = []
@@ -257,7 +263,7 @@ function drawBars(
   for (let i = 0; i < n; i++) {
     const v = y[i]
     if (!Number.isFinite(v)) continue
-    const x = plot.left + i * slot + gap / 2
+    const x = plot.left + i * slot + barPad
     const top = scaleY(v)
     const h = top - baseline
 

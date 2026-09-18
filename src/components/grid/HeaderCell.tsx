@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, EyeOff, MoreVertical, Pin, PinOff, Ruler } from 'lu
 import { useRef } from 'react'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { MenuItem, MenuSeparator, Popover } from '@/components/ui/Popover'
-import { kindColorVar, kindLabel, kindShort } from '@/lib/format'
+import { hasUsefulDistribution, kindColorVar, kindLabel, kindShort } from '@/lib/format'
 import type { ColumnMeta, SortSpec } from '@/lib/types'
 
 const MIN_WIDTH = 56
@@ -102,7 +102,7 @@ export function HeaderCell({
         {column.name}
       </button>
 
-      {spark && spark.length > 1 && (
+      {spark && spark.length > 1 && hasUsefulDistribution(column.kind, column.distinctCount) && (
         <span className="hidden shrink-0 text-ink-3 opacity-50 lg:inline">
           <Sparkline values={spark} width={40} height={16} kind={column.kind === 'string' ? 'bar' : 'line'} />
         </span>

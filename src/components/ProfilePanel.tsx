@@ -7,7 +7,16 @@ import { SidePanel } from '@/components/SidePanel'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { Pill } from '@/components/ui/Button'
 import { getEngine } from '@/lib/engine/client'
-import { formatCompact, formatCount, formatDate, formatNumber, kindColorVar, kindLabel, kindShort } from '@/lib/format'
+import {
+  formatCompact,
+  formatCount,
+  formatDate,
+  formatNumber,
+  hasUsefulDistribution,
+  kindColorVar,
+  kindLabel,
+  kindShort,
+} from '@/lib/format'
 import { useStore } from '@/lib/state/store'
 import type { ColumnMeta, ColumnStats } from '@/lib/types'
 
@@ -96,21 +105,37 @@ function ColumnCard({
             {column.distinctCount >= 0 && ` · ${formatCompact(column.distinctCount)} distinct`}
           </span>
         </span>
-        <span className="shrink-0 text-ink-3">
-          <Sparkline values={spark} width={64} height={22} kind={column.kind === 'string' || column.kind === 'bool' ? 'bar' : 'line'} />
-        </span>
+        {hasUsefulDistribution(column.kind, column.distinctCount) ? (
+          <span className="shrink-0 text-ink-3">
+            <Sparkline
+              values={spark}
+              width={64}
+              height={22}
+              kind={column.kind === 'string' || column.kind === 'bool' ? 'bar' : 'line'}
+            />
+          </span>
+        ) : (
+          <span className="shrink-0 text-2xs text-ink-3">unique</span>
+        )}
         <ChevronDown
           size={14}
           className={clsx('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')}
         />
       </button>
 
-      <div className="df-sunken mx-3 mb-2 h-1.5 overflow-hidden rounded-full">
+      {/* A full column is the boring case, so it gets a quiet hairline. The
+          bar only gains colour as data actually goes missing. */}
+      <div className="df-sunken mx-3 mb-2 h-1 overflow-hidden rounded-full">
         <div
           className="h-full rounded-full transition-[width] duration-300"
           style={{
             width: `${Math.max(1, complete)}%`,
-            background: complete === 100 ? 'var(--good)' : 'var(--grad-accent)',
+            background:
+              complete === 100
+                ? 'var(--line-2)'
+                : complete >= 50
+                  ? 'var(--grad-accent)'
+                  : 'var(--warning)',
           }}
         />
       </div>

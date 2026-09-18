@@ -300,43 +300,49 @@ export function DataGrid({
       </div>
       <div className="sticky top-0 z-20 h-px w-full bg-line-1" style={{ marginTop: -1 }} />
 
-      {/* Scroll range. Rows are drawn in the sticky layer below, not in here. */}
-      <div style={{ height: Math.max(spacerHeight, 1), width: pinnedWidth + colRange.totalSize }} />
+      {rowCount === 0 ? (
+        <div className="flex items-center justify-center py-16">
+          <p className="text-2xs text-ink-3">{loading ? 'Working…' : 'No rows match these filters'}</p>
+        </div>
+      ) : (
+        rows.map((r) => {
+          // Position in the viewport, then translate into content coordinates by
+          // adding scrollTop. Once the spacer is scaled these two spaces diverge,
+          // so rows must be anchored to the viewport rather than to the spacer.
+          const viewportTop = HEADER_HEIGHT + r * rowHeight - virtualTop
+          if (viewportTop < -rowHeight || viewportTop > viewport.height + rowHeight) return null
+          return (
+            <Row
+              key={r}
+              rowIndex={r}
+              top={scroll.top + viewportTop}
+              height={rowHeight}
+              pinned={pinned}
+              scrolling={scrolling.slice(colRange.start, colRange.end)}
+              offsetBefore={colRange.offsetBefore}
+              pinnedWidth={pinnedWidth}
+              totalWidth={colRange.totalSize}
+              widthOf={widthOf}
+              valueAt={valueAt}
+              loaded={r >= windowStart && r < windowEnd}
+              highlight={highlight}
+              shadow={shadow}
+              focusedCol={focus.row === r ? focus.col : -1}
+              colIndexOf={colIndexOf}
+              onCellClick={onCellClick}
+              rowId={rowWindow && r >= windowStart && r < windowEnd ? rowWindow.rowIds[r - windowStart] : r}
+            />
+          )
+        })
+      )}
 
-      <div className="pointer-events-none sticky top-0 left-0 z-10 h-0 w-full">
-        {rowCount === 0 ? (
-          <div className="pointer-events-auto flex items-center justify-center" style={{ height: 200, paddingTop: HEADER_HEIGHT }}>
-            <p className="text-2xs text-ink-3">{loading ? 'Working…' : 'No rows match these filters'}</p>
-          </div>
-        ) : (
-          rows.map((r) => {
-            const top = HEADER_HEIGHT + r * rowHeight - virtualTop
-            if (top < -rowHeight || top > viewport.height + rowHeight) return null
-            return (
-              <Row
-                key={r}
-                rowIndex={r}
-                top={top}
-                height={rowHeight}
-                pinned={pinned}
-                scrolling={scrolling.slice(colRange.start, colRange.end)}
-                offsetBefore={colRange.offsetBefore}
-                pinnedWidth={pinnedWidth}
-                totalWidth={colRange.totalSize}
-                widthOf={widthOf}
-                valueAt={valueAt}
-                loaded={r >= windowStart && r < windowEnd}
-                highlight={highlight}
-                shadow={shadow}
-                focusedCol={focus.row === r ? focus.col : -1}
-                colIndexOf={colIndexOf}
-                onCellClick={onCellClick}
-                rowId={rowWindow && r >= windowStart && r < windowEnd ? rowWindow.rowIds[r - windowStart] : r}
-              />
-            )
-          })
-        )}
-      </div>
+      {/* Gives the container its scroll range; rows float above it. */}
+      <div
+        style={{
+          height: Math.max(spacerHeight - HEADER_HEIGHT, 1),
+          width: pinnedWidth + colRange.totalSize,
+        }}
+      />
     </div>
   )
 }
@@ -399,7 +405,7 @@ const Row = memo(function Row({
     <div
       role="row"
       aria-rowindex={rowIndex + 2}
-      className="group/row pointer-events-auto absolute flex w-max min-w-full hover:bg-surface-2"
+      className="group/row absolute flex w-max min-w-full hover:bg-surface-2"
       style={{ top, height }}
     >
       {pinned.length > 0 && (

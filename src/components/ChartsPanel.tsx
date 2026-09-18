@@ -22,7 +22,17 @@ const AGGS: AggFn[] = ['count', 'sum', 'avg', 'min', 'max', 'median']
 let chartSeq = 0
 
 function defaultSpec(columns: ColumnMeta[]): ChartSpec | null {
-  const categorical = columns.find((c) => c.kind === 'string' || c.kind === 'bool')
+  // Grouping by an id column gives a chart of ten thousand bars of height one.
+  // Prefer the lowest-cardinality categorical column, which is the one that
+  // actually says something.
+  const categorical = columns
+    .filter(
+      (c) =>
+        c.kind === 'bool' ||
+        (c.kind === 'string' && c.distinctCount > 1 && c.distinctCount <= 50),
+    )
+    .sort((a, b) => (a.distinctCount || 2) - (b.distinctCount || 2))[0]
+
   const quantitative = columns.find((c) => c.kind === 'int' || c.kind === 'float')
   const x = categorical ?? quantitative ?? columns[0]
   if (!x) return null
