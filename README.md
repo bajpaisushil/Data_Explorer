@@ -27,7 +27,23 @@ npm run dev        # http://localhost:3000
 npm run build      # static export to ./out — any file host will serve it
 npm test           # engine unit tests
 npm run typecheck
+npm run lint
 ```
+
+There is also an end-to-end smoke test that drives the real app in a real browser:
+
+```bash
+npx playwright install chromium   # once
+npm run dev                       # in one shell
+npm run test:e2e                  # in another
+```
+
+It generates a million rows through the worker, scrolls to both extremes of the
+scaled virtual space, then exercises search, filter, group, saved views, the
+storage panel, an IndexedDB round trip across a page reload, and clearing
+storage. It is worth running: it caught two bugs the unit tests could not — rows
+rendering off-screen behind an 8,000,000px spacer, and a profiling pass that
+starved the grid for five seconds.
 
 No file handy? The landing screen generates realistic 10k–2M-row datasets (e-commerce orders,
 IoT sensor readings, web events) with correlations, seasonality, skew, nulls and outliers, so

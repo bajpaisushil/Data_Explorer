@@ -110,10 +110,25 @@ export function DataGrid({
   const bodyViewport = Math.max(0, viewport.height - HEADER_HEIGHT)
   const virtualTop = useMemo(() => {
     if (!scaled) return scroll.top
-    const spacerRange = Math.max(1, spacerHeight - bodyViewport)
+    // The denominator is the browser's OWN scroll range, which is
+    // scrollHeight - clientHeight; the numerator maps onto the row area, which
+    // is the viewport minus the sticky header. Mixing the two leaves the last
+    // few rows unreachable at full scroll.
+    const spacerRange = Math.max(1, spacerHeight - viewport.height)
     const virtualRange = Math.max(0, totalHeight - bodyViewport)
     return Math.min(virtualRange, (scroll.top / spacerRange) * virtualRange)
-  }, [scaled, scroll.top, spacerHeight, bodyViewport, totalHeight])
+  }, [scaled, scroll.top, spacerHeight, viewport.height, bodyViewport, totalHeight])
+
+  /** Inverse of the mapping above, for programmatic scrolling. */
+  const toScrollTop = useCallback(
+    (wantVirtualTop: number) => {
+      if (!scaled) return wantVirtualTop
+      const virtualRange = Math.max(1, totalHeight - bodyViewport)
+      const spacerRange = Math.max(0, spacerHeight - viewport.height)
+      return (wantVirtualTop / virtualRange) * spacerRange
+    },
+    [scaled, totalHeight, bodyViewport, spacerHeight, viewport.height],
+  )
 
   const firstRow = Math.max(0, Math.floor(virtualTop / rowHeight) - GRID_OVERSCAN)
   const visibleRows = Math.ceil(bodyViewport / rowHeight) + GRID_OVERSCAN * 2
@@ -167,16 +182,16 @@ export function DataGrid({
         const el = scrollRef.current
         if (el) {
           const targetTop = next.row * rowHeight
-          if (targetTop < virtualTop) el.scrollTop = scaled ? (targetTop / Math.max(1, totalHeight - bodyViewport)) * (spacerHeight - bodyViewport) : targetTop
-          else if (targetTop > virtualTop + bodyViewport - rowHeight) {
-            const want = targetTop - bodyViewport + rowHeight
-            el.scrollTop = scaled ? (want / Math.max(1, totalHeight - bodyViewport)) * (spacerHeight - bodyViewport) : want
+          if (targetTop < virtualTop) {
+            el.scrollTop = toScrollTop(targetTop)
+          } else if (targetTop > virtualTop + bodyViewport - rowHeight) {
+            el.scrollTop = toScrollTop(targetTop - bodyViewport + rowHeight)
           }
         }
         return next
       })
     },
-    [rowCount, columns.length, rowHeight, virtualTop, scaled, totalHeight, bodyViewport, spacerHeight],
+    [rowCount, columns.length, rowHeight, virtualTop, bodyViewport, toScrollTop],
   )
 
   const onKeyDown = (e: React.KeyboardEvent) => {

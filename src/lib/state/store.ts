@@ -140,6 +140,24 @@ export type Store = State & Actions
 let generation = 0
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let rangeToken = 0
+let profileTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Profiling every column is expensive and the worker is single threaded, so a
+ * profile queued ahead of a scroll's window request blocks the grid from
+ * painting. Sparklines are an enhancement; the rows are not. Run profiling only
+ * once the user has stopped moving.
+ */
+function scheduleProfile(run: () => void) {
+  if (profileTimer) clearTimeout(profileTimer)
+  profileTimer = setTimeout(() => {
+    profileTimer = null
+    const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
+      .requestIdleCallback
+    if (idle) idle(run, { timeout: 2000 })
+    else run()
+  }, 400)
+}
 
 const initial: State = {
   status: 'empty',
@@ -189,7 +207,9 @@ export const useStore = create<Store>((set, get) => {
       await fetchRange(range.start, Math.max(range.end, range.start + 60), gen)
       if (gen !== generation) return
       void refreshAllCharts()
-      void get().refreshProfiles()
+      scheduleProfile(() => {
+        void get().refreshProfiles()
+      })
     } catch (err) {
       if (err instanceof CancelledError || gen !== generation) return
       set({ status: 'error', error: (err as Error).message })
@@ -348,6 +368,11 @@ export const useStore = create<Store>((set, get) => {
 
     requestRange(start, end) {
       set({ range: { start, end } })
+      if (profileTimer) {
+        scheduleProfile(() => {
+          void get().refreshProfiles()
+        })
+      }
       const token = ++rangeToken
       const gen = generation
       // One frame of coalescing: a flick scroll fires dozens of these.

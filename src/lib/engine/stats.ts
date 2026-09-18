@@ -26,6 +26,8 @@ import {
 const SAMPLE_CEILING = 2_000_000
 const DISTINCT_CAP = 100_000
 const SPARK_BINS = 24
+/** Above this many categories a sparkline is noise, so it is not worth building. */
+const SPARK_MAX_CATEGORIES = 100
 
 /* ------------------------------------------------------------ bin helpers */
 
@@ -323,6 +325,28 @@ function categoricalStats(col: ColumnData, sel: Uint32Array, topN: number): Cate
   }
 }
 
+/**
+ * Exact null count for a text column without materialising a single string.
+ * The tally path allocates one JS string per row, which on a million-row
+ * unique-id column costs seconds — and for such a column the tally is then
+ * discarded, because no sparkline is drawn for it.
+ */
+function countStringNulls(col: ColumnData, sel: Uint32Array): number {
+  if (col.kind !== 'string') return 0
+  let nulls = 0
+  if (col.encoding === 'dict') {
+    const codes = col.codes
+    for (let i = 0; i < sel.length; i++) if (codes[sel[i]] < 0) nulls++
+  } else {
+    const bits = col.nulls
+    for (let i = 0; i < sel.length; i++) {
+      const r = sel[i]
+      if ((bits[r >> 3] >> (r & 7)) & 1) nulls++
+    }
+  }
+  return nulls
+}
+
 function boolStats(col: ColumnData, sel: Uint32Array): BoolStats {
   let trueCount = 0
   let falseCount = 0
@@ -382,10 +406,23 @@ export function computeProfiles(
       nulls = s.nulls
       spark = [s.falseCount, s.trueCount]
     } else if (meta.kind === 'string') {
-      // Only the top-N tally is needed for a sparkline, so skip the full stats.
-      const s = categoricalStats(col, sel, SPARK_BINS)
-      nulls = s.nulls
-      spark = s.top.map((t) => t.count)
+      const categories =
+        meta.distinctCount >= 0
+          ? meta.distinctCount
+          : col.kind === 'string' && col.encoding === 'dict'
+            ? col.dictionary.length
+            : Infinity
+
+      if (categories <= SPARK_MAX_CATEGORIES) {
+        // Cheap: tallies Int32Array codes, no strings involved.
+        const s = categoricalStats(col, sel, SPARK_BINS)
+        nulls = s.nulls
+        spark = s.top.map((t) => t.count)
+      } else {
+        // Too many categories to plot, so only the null count is wanted.
+        nulls = countStringNulls(col, sel)
+        spark = []
+      }
     } else if (col.kind !== 'string' && col.kind !== 'bool') {
       const src = col.values
       let min = Infinity
