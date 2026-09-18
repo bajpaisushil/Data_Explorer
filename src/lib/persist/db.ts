@@ -180,6 +180,25 @@ function deserializeColumn(record: StoredColumn): ColumnData {
  * Without this a re-save that removed a column leaves the old record behind
  * forever, quietly inflating what the storage panel reports as used.
  */
+/**
+ * Removes a dataset's header and column records but leaves its saved views
+ * alone. Used to undo a failed save: the views predate it and are a few
+ * hundred bytes of metadata, so destroying them would punish the user for a
+ * quota failure that had nothing to do with them.
+ */
+async function deleteDatasetData(db: IDBDatabase, datasetId: string): Promise<void> {
+  const tx = db.transaction([STORE_DATASETS, STORE_COLUMNS], 'readwrite')
+  tx.objectStore(STORE_DATASETS).delete(datasetId)
+  const request = tx.objectStore(STORE_COLUMNS).index('datasetId').openCursor(IDBKeyRange.only(datasetId))
+  request.onsuccess = () => {
+    const cursor = request.result
+    if (!cursor) return
+    cursor.delete()
+    cursor.continue()
+  }
+  await commit(tx)
+}
+
 async function pruneColumns(db: IDBDatabase, datasetId: string, keep: Set<string>): Promise<void> {
   const tx = db.transaction(STORE_COLUMNS, 'readwrite')
   const request = tx.objectStore(STORE_COLUMNS).index('datasetId').openCursor(IDBKeyRange.only(datasetId))
@@ -233,7 +252,8 @@ export async function saveDataset(
     // occupies the quota whose exhaustion usually caused the failure. This does
     // mean a failed re-save loses the previous copy; the alternative is writing
     // a second copy alongside the first, which needs the room we just ran out of.
-    await deleteDataset(meta.id).catch(() => {})
+    // Saved views are deliberately spared — see deleteDatasetData.
+    await deleteDatasetData(db, meta.id).catch(() => {})
     throw err
   }
 

@@ -514,6 +514,19 @@ function push(acc: Accumulator, v: number) {
   acc.values?.push(v)
 }
 
+/** Folds one accumulator into another, so a merged group can be aggregated. */
+function mergeAcc(into: Accumulator, from: Accumulator) {
+  into.sum += from.sum
+  into.count += from.count
+  into.nulls += from.nulls
+  if (from.min < into.min) into.min = from.min
+  if (from.max > into.max) into.max = from.max
+  if (into.values && from.values) {
+    // A spread would blow the stack on a large group.
+    for (let i = 0; i < from.values.length; i++) into.values.push(from.values[i])
+  }
+}
+
 function finish(acc: Accumulator, fn: AggFn, rows: number): number {
   switch (fn) {
     case 'count':
@@ -593,6 +606,9 @@ export function buildChart(ds: Dataset, sel: Uint32Array, spec: ChartSpec): Char
   const keyNumbers: number[] = []
 
   // Quantitative x on a bar/line chart is binned first, so the axis stays honest.
+  // Rows that actually reach a mark. Null x (and null y for a measure that
+  // needs one) are skipped, so this is not the same as the selection size.
+  let contributing = 0
   let binSpec: { start: number; width: number; count: number } | null = null
   if (quantitativeX && (xCol.kind === 'int' || xCol.kind === 'float' || xCol.kind === 'date')) {
     let min = Infinity
@@ -646,6 +662,7 @@ export function buildChart(ds: Dataset, sel: Uint32Array, spec: ChartSpec): Char
       rowCounts.push(0)
     }
     rowCounts[slot]++
+    contributing++
     if (yCol && (yCol.kind === 'int' || yCol.kind === 'float' || yCol.kind === 'date')) {
       push(accs[slot], yCol.values[row])
     }
@@ -676,7 +693,20 @@ export function buildChart(ds: Dataset, sel: Uint32Array, spec: ChartSpec): Char
     kept = order.slice(0, limit)
     // Everything past the cut folds into one trailing "Other" — never dropped
     // silently, and never given a new hue.
-    for (const i of order.slice(limit)) otherValue += values[i] || 0
+    //
+    // The fold merges the ACCUMULATORS and re-aggregates, rather than summing
+    // the per-category results. Summing is only right for count and sum: an
+    // "Other" holding the sum of twenty averages is a bar that dwarfs every
+    // real category and means nothing. Merging gives the true weighted mean,
+    // and the true min/max/median, of the remainder.
+    const rest = newAcc(needValues)
+    let restRows = 0
+    for (const i of order.slice(limit)) {
+      mergeAcc(rest, accs[i])
+      restRows += rowCounts[i]
+    }
+    otherValue = finish(rest, spec.yColumnId ? spec.agg : 'count', restRows)
+    if (!Number.isFinite(otherValue)) otherValue = 0
   }
 
   const xLabels = kept.map((i) => keys[i])
@@ -702,7 +732,7 @@ export function buildChart(ds: Dataset, sel: Uint32Array, spec: ChartSpec): Char
     xIsDate: xMeta.kind === 'date',
     truncated,
     totalCategories,
-    sampled: sel.length,
+    sampled: contributing,
   }
 }
 
@@ -730,10 +760,12 @@ function buildHistogram(
   const x = new Float64Array(bins.length)
   const xEnd = new Float64Array(bins.length)
   const y = new Float64Array(bins.length)
+  let binned = 0
   for (let i = 0; i < bins.length; i++) {
     x[i] = bins[i].start
     xEnd[i] = bins[i].end
     y[i] = bins[i].count
+    binned += bins[i].count
   }
 
   return {
@@ -747,7 +779,7 @@ function buildHistogram(
     xIsDate: isDate,
     truncated: false,
     totalCategories: bins.length,
-    sampled: sel.length,
+    sampled: binned,
   }
 }
 

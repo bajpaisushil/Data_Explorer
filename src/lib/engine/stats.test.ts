@@ -460,6 +460,24 @@ describe('computeStats — outlierCount', () => {
     expect(s.outlierCount).toBe(2)
   })
 
+  it('places the fences at exactly 1.5 * IQR, not merely somewhere near it', () => {
+    // sorted = [0..19, 28, 32]; p25 = 5.25, p75 = 15.75, IQR = 10.5
+    // fences = [-10.5, 31.5]  ->  32 is outside, 28 is inside.
+    // The fixtures above plant their outliers so far out that any multiplier
+    // in roughly 1..3 answers the same. This one does not: the count is 2 at
+    // a 1.0x multiplier and 0 at 2.0x, so the constant is pinned from both
+    // sides and a "tune the outlier sensitivity" edit cannot ship silently.
+    const values = [...Array.from({ length: 20 }, (_, i) => i), 28, 32]
+    const d = ds([{ name: 'n', kind: 'int' }], [num(values)], values.length)
+    const s = quant(computeStats(d, all(values.length), 'n', 30))
+    expect(s.p25).toBeCloseTo(5.25, 12)
+    expect(s.p75).toBeCloseTo(15.75, 12)
+    expect(s.outlierCount).toBe(1)
+  })
+
+  // Derives its expectation from the p25/p75 the implementation reports, so it
+  // checks the comparison loop against the reported fences — never the fence
+  // width itself. The test above is what pins the width.
   it('agrees with the fences it reports', () => {
     const values = [5, 1, 100, 2, 8, 3, -50, 4, 9, 6, 7, 11, 12, 13]
     const d = ds([{ name: 'n', kind: 'int' }], [num(values)], values.length)
@@ -840,8 +858,10 @@ describe('computeProfiles', () => {
   })
 
   it('reports the same completeness whichever encoding a text column uses', () => {
-    // Physical storage is an implementation detail; a profile must not shift
-    // because a column happened to be stored as a blob rather than a dict.
+    // Completeness and the null count are storage-independent: they must not
+    // shift because a column happened to be stored as a blob rather than a
+    // dict. The sparkline is deliberately not, and the assertions below pin
+    // that asymmetry rather than leaving it unexamined.
     const text = ['a', null, 'c', 'd', null, 'f', 'g', 'h']
     const asDict = ds([{ name: 's', kind: 'string', encoding: 'dict' }], [dict(text)], text.length)
     const asBlob = ds([{ name: 's', kind: 'string', encoding: 'blob' }], [blob(text)], text.length)
@@ -851,6 +871,44 @@ describe('computeProfiles', () => {
     expect(b.stats.nulls).toBe(2)
     expect(b.completeness).toBe(d.completeness)
     expect(b.completeness).toBeCloseTo(6 / 8, 12)
+
+    // The sparkline does depend on encoding, by design. With distinctCount at
+    // -1 the dict column can read its own dictionary length (6 categories, so
+    // cheap enough to tally), while the blob column has no cardinality to read
+    // and declines to decode every string on the chance it is unique.
+    expect(d.spark).toEqual([1, 1, 1, 1, 1, 1])
+    expect(b.spark).toEqual([])
+  })
+
+  it('lets the parser-supplied distinct count veto a dict sparkline', () => {
+    // meta.distinctCount, not the dictionary, decides: 6 dictionary entries
+    // but a reported 500 categories sends this down the count-only path, so
+    // dropping the parser's count in favour of dictionary.length is caught.
+    const six = ['a', 'b', 'a', null, 'c', 'a']
+    const d = ds(
+      [{ name: 's', kind: 'string', encoding: 'dict', distinctCount: 500 }],
+      [dict(six)],
+      six.length,
+    )
+    const p = computeProfiles(d, all(six.length), ['s'])[0]
+    expect(p.spark).toEqual([])
+    expect(p.stats.nulls).toBe(1)
+    expect(p.completeness).toBeCloseTo(5 / 6, 12)
+  })
+
+  it('lets the parser-supplied distinct count earn a blob column a sparkline', () => {
+    // The mirror case: a blob is only assumed high-cardinality when nothing
+    // says otherwise. A reported 3 categories puts it on the tally path.
+    const three = ['x', 'y', 'x', null, 'z', 'x']
+    const d = ds(
+      [{ name: 's', kind: 'string', encoding: 'blob', distinctCount: 3 }],
+      [blob(three)],
+      three.length,
+    )
+    const p = computeProfiles(d, all(three.length), ['s'])[0]
+    expect(p.spark).toEqual([3, 1, 1])
+    expect(p.stats.nulls).toBe(1)
+    expect(sum(p.spark)).toBe(5)
   })
 
   it('counts nulls in a high-cardinality text column over the selection only', () => {
@@ -897,6 +955,21 @@ describe('buildChart — histogram', () => {
     expect(c.xEnd!.length).toBe(y.length)
     expect(sum(y)).toBe(9) // 10 rows, one null
     expect(c.xLabels).toBeNull()
+    expect(c.totalCategories).toBe(c.x!.length)
+    // Bounded here, pinned exactly in the it.fails below: whichever way the
+    // sampled/selection ambiguity is resolved, the answer is in this range.
+    expect(c.sampled).toBeGreaterThanOrEqual(9)
+    expect(c.sampled).toBeLessThanOrEqual(values.length)
+  })
+
+  // SOURCE BUG (see sourceBugs): buildHistogram returns `sampled: sel.length`,
+  // so this reports 10 for the 9 rows it actually binned. ChartData.sampled is
+  // documented as "Rows contributing to the chart", and buildScatter reports
+  // the true plotted count, so 9 is the documented answer. The assertion stays
+  // correct and stays red rather than being relaxed to sel.length.
+  it('reports the binned row count as sampled, not the selection size', () => {
+    const c = buildChart(dataset, all(values.length), chart({ type: 'histogram', bins: 6 }))
+    expect(c.sampled).toBe(9)
   })
 
   it('emits monotone, contiguous bin edges', () => {
@@ -954,6 +1027,22 @@ describe('buildChart — bar / pie top-N', () => {
     const c = buildChart(dataset, all(cats.length), chart({ type, limit: 3 }))
     expect(sum(c.series[0].y)).toBe(TOTAL)
     expect(c.xLabels!.length).toBe(c.series[0].y.length)
+    expect(c.totalCategories).toBe(6)
+    // Bounded here, pinned exactly in the it.fails below.
+    expect(c.sampled).toBeGreaterThanOrEqual(TOTAL)
+    expect(c.sampled).toBeLessThanOrEqual(cats.length)
+  })
+
+  // SOURCE BUG (see sourceBugs): buildChart returns `sampled: sel.length`, so
+  // this reports 34 while exactly 31 rows are plotted — the 3 null categories
+  // are skipped and contribute nothing. buildScatter reports the true plotted
+  // count for the same documented field ("Rows contributing to the chart"),
+  // and the UI prints it as "N rows" under the chart.
+  it('bar/pie: reports the plotted row count as sampled, not the selection size', () => {
+    for (const type of ['bar', 'pie'] as const) {
+      const c = buildChart(dataset, all(cats.length), chart({ type, limit: 3 }))
+      expect(c.sampled).toBe(TOTAL)
+    }
   })
 
   it('ranks categories by descending value', () => {
@@ -1110,6 +1199,36 @@ describe('buildChart — line over a date axis', () => {
   })
 })
 
+describe('buildChart — binning a wide quantitative axis', () => {
+  // distinctCount is left at -1 ("unknown"), which is the branch that forces
+  // binning. Ascending-order checks alone cannot see this: the fixtures above
+  // come back sorted whether they were bucketed or used raw. Here the axis is
+  // 1000 values wide, so unbinned output would be 1000 keys in the Map — 1000
+  // accumulators behind a top-12 bar chart, and 1000 points on a line.
+  const N = 1000
+  const dataset = ds(
+    [{ name: 'x', kind: 'int' }],
+    [num(Array.from({ length: N }, (_, i) => i))],
+    N,
+  )
+  const starts = Array.from({ length: 10 }, (_, i) => i * 100)
+
+  it('buckets a 1000-distinct line axis to the requested bin width', () => {
+    const c = buildChart(dataset, all(N), chart({ type: 'line', bins: 10 }))
+    expect(Array.from(c.x!)).toEqual(starts)
+    expect(Array.from(c.series[0].y)).toEqual(starts.map(() => 100))
+    expect(sum(c.series[0].y)).toBe(N)
+  })
+
+  it('buckets a 1000-distinct bar axis instead of building 1000 categories', () => {
+    const c = buildChart(dataset, all(N), chart({ type: 'bar', bins: 10 }))
+    expect(c.xLabels).toEqual(starts.map(String))
+    expect(c.totalCategories).toBe(10)
+    expect(c.truncated).toBe(false)
+    expect(sum(c.series[0].y)).toBe(N)
+  })
+})
+
 describe('buildChart — scatter', () => {
   it('returns x and y of equal length', () => {
     const xs = [1, 2, null, 4, 5, 6]
@@ -1262,5 +1381,87 @@ describe('buildChart — degenerate input', () => {
     const c = buildChart(d, all(4), chart({ type: 'bar' }))
     expect(new Set(c.xLabels)).toEqual(new Set(['true', 'false']))
     expect(sum(c.series[0].y)).toBe(3)
+  })
+})
+
+describe('the "Other" fold re-aggregates rather than summing', () => {
+  /**
+   * Summing per-category results is only correct for count and sum. An "Other"
+   * bar holding the sum of twenty averages dwarfs every real category and means
+   * nothing, so the fold must merge the underlying accumulators.
+   */
+  function skewed() {
+    const cats: string[] = []
+    const vals: number[] = []
+    // Six categories. a and b are the top two by average; c..f each average 10.
+    const plan: [string, number[]][] = [
+      ['a', [100, 100]],
+      ['b', [90, 90]],
+      ['c', [10, 10]],
+      ['d', [10, 10]],
+      ['e', [10, 10]],
+      ['f', [10, 10]],
+    ]
+    for (const [name, xs] of plan) {
+      for (const x of xs) {
+        cats.push(name)
+        vals.push(x)
+      }
+    }
+    return ds(
+      [
+        { name: 'cat', kind: 'string', encoding: 'dict' },
+        { name: 'v', kind: 'int' },
+      ],
+      [dict(cats), num(vals)],
+      cats.length,
+    )
+  }
+
+  const spec = (agg: AggFn): ChartSpec => ({
+    id: 'c',
+    title: 'c',
+    type: 'bar',
+    xColumnId: 'cat',
+    yColumnId: 'v',
+    agg,
+    bins: 30,
+    limit: 2,
+    seriesColumnId: null,
+  })
+
+  it('averages the remainder instead of adding the averages up', () => {
+    const d = skewed()
+    const data = buildChart(d, all(12), spec('avg'))
+
+    expect(data.truncated).toBe(true)
+    expect(data.xLabels?.[data.xLabels.length - 1]).toBe('Other')
+
+    const other = data.series[0].y[data.series[0].y.length - 1]
+    // Four folded categories each averaging 10 -> the remainder averages 10.
+    // Adding the four averages together would give 40.
+    expect(other).toBeCloseTo(10, 10)
+  })
+
+  it('takes the true max of the remainder, not the sum of the maxima', () => {
+    const data = buildChart(skewed(), all(12), spec('max'))
+    const other = data.series[0].y[data.series[0].y.length - 1]
+    expect(other).toBe(10)
+  })
+
+  it('still adds up when the aggregate really is additive', () => {
+    const data = buildChart(skewed(), all(12), spec('sum'))
+    const other = data.series[0].y[data.series[0].y.length - 1]
+    // c..f contribute 8 rows of 10.
+    expect(other).toBe(80)
+  })
+
+  it('counts every folded row when counting rows', () => {
+    const d = skewed()
+    const data = buildChart(d, all(12), { ...spec('count'), yColumnId: null })
+    const y = data.series[0].y
+    expect(y[y.length - 1]).toBe(8)
+    // Nothing is lost by folding.
+    expect(Array.from(y).reduce((a, b) => a + b, 0)).toBe(12)
   })
 })

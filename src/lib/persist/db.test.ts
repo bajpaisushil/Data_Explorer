@@ -776,11 +776,28 @@ describe('round trip fidelity', () => {
   })
 
   it('does not hand back storage that aliases the caller’s buffers', async () => {
+    // The fake clones on `put`, synchronously, exactly as real IndexedDB does,
+    // so mutating the source *after* `saveDataset` resolves proves nothing about
+    // db.ts — the deep copy would be the harness's. The claim is about the record
+    // db.ts hands to `put`: its buffers must be copies of the caller's, not the
+    // caller's live ones. The write hook sees that record before the clone.
+    let raw: { buffers: Record<string, ArrayBuffer> } | undefined
+    backend.writeHook = (store, op, value) => {
+      if (store === 'columns' && op === 'put') raw = value as { buffers: Record<string, ArrayBuffer> }
+      return null
+    }
+
     const column = num([1, 2, 3])
     await db.saveDataset(meta('ds', [{ name: 'i', kind: 'int' }]), [column])
-    // Mutating the source after saving must not change what was persisted.
-    ;(column as { values: Float64Array }).values[0] = 999
 
+    const live = (column as { values: Float64Array }).values
+    expect(raw).toBeDefined()
+    // Handing storage the caller's own buffer is the bug; the copy must be exact.
+    expect(raw!.buffers.values).not.toBe(live.buffer)
+    expect(raw!.buffers.values.byteLength).toBe(live.byteLength)
+
+    // ...and the copy is what survives: mutating the source cannot reach through.
+    live[0] = 999
     const loaded = await db.loadDataset('ds')
     expect(Array.from((loaded!.columns[0] as { values: Float64Array }).values)).toEqual([1, 2, 3])
   })
@@ -832,13 +849,15 @@ describe('saveDataset', () => {
 
     expect(res).toEqual({ datasetId: 'ds', bytes: expected })
     expect(res.bytes).toBeGreaterThan(0)
-    // At least one tick per column, and the exact call count is left to the
-    // implementation — what callers depend on is that it advances and finishes.
-    expect(progress.length).toBeGreaterThanOrEqual(m.columns.length)
+    // One tick per column, then the final one. A bar that jumps to 100% on the
+    // first column and then sits there for the rest of a 30-second save is the
+    // regression this exists to catch, so pin the shape rather than an envelope
+    // that `onProgress(1)` per column would also satisfy.
+    expect(progress).toHaveLength(m.columns.length + 1)
+    expect(progress.slice(0, -1)).toEqual(m.columns.map((_, i) => (i + 1) / (m.columns.length + 1)))
     expect(progress[progress.length - 1]).toBe(1)
-    expect(progress.every((r) => r > 0 && r <= 1)).toBe(true)
-    // Progress must never go backwards.
-    expect([...progress].sort((a, b) => a - b)).toEqual(progress)
+    // Strictly increasing: it never goes backwards, and never stalls either.
+    expect(progress.every((r, i) => i === 0 || r > progress[i - 1])).toBe(true)
   })
 
   it('writes one record per column, keyed by dataset and column', async () => {
@@ -1050,10 +1069,11 @@ describe('error mapping', () => {
   })
 
   /**
-   * DOCUMENTS A BUG — see notes. The dataset header is committed in its own
-   * transaction before any column is written, so a failure partway through a
-   * save leaves a record that listDatasets advertises but loadDataset can never
-   * open. A failed save should leave nothing behind.
+   * Regression: the header is written last, so a failure partway through a save
+   * can no longer leave a record that listDatasets advertises but loadDataset
+   * cannot open. Note this case never reaches the rollback for anything — it is
+   * a first save, so there is nothing committed to undo; the two tests below
+   * cover the rollback itself.
    */
   it('does not leave an unloadable dataset behind after a failed save', async () => {
     backend.writeHook = (store) =>
@@ -1065,6 +1085,56 @@ describe('error mapping', () => {
     // The symptom: a header with no columns behind it, which can never be opened.
     expect(await db.loadDataset('ds')).toBeNull()
     expect(await db.listDatasets()).toEqual([])
+  })
+
+  it('rolls back the columns a failed save had already written', async () => {
+    const m = meta('ds', [
+      { name: 'i', kind: 'int' },
+      { name: 'j', kind: 'int' },
+    ])
+    // The first column commits; the second runs out of room. Deletes still work,
+    // so the rollback is free to run — the question is whether it does.
+    backend.writeHook = (store, op, value) =>
+      store === 'columns' && op === 'put' && (value as { columnId: string }).columnId === 'j'
+        ? new DOMException('no room', 'QuotaExceededError')
+        : null
+
+    await expect(settlesWithin(db.saveDataset(m, [num([1, 2]), num([3, 4])]))).rejects.toThrow(/^QUOTA_EXCEEDED/)
+
+    backend.writeHook = null
+    // Column 'i' was committed before the failure. Left behind it is unopenable
+    // dead weight occupying the very quota whose exhaustion caused the failure.
+    expect(backend.count('columns')).toBe(0)
+    expect(backend.count('datasets')).toBe(0)
+  })
+
+  /**
+   * DOCUMENTS A BUG. saveDataset's rollback calls `deleteDataset`, which cascades
+   * into STORE_VIEWS, so a save that merely ran out of room also destroys every
+   * SavedView for that dataset — tiny metadata that had nothing to do with the
+   * failure, and that costs nothing to keep. db.ts's comment owns up to losing the
+   * previous copy of the data; it says nothing about the views. The catch should
+   * undo only what this save wrote: the dataset header and this dataset's column
+   * records.
+   */
+  it('a failed re-save keeps the saved views', async () => {
+    const m = meta('ds', [
+      { name: 'i', kind: 'int' },
+      { name: 'j', kind: 'int' },
+    ])
+    await db.saveDataset(m, [num([1, 2]), num([3, 4])])
+    await db.saveView(view('v1', 'ds', 1))
+
+    // Room runs out on the second column of the re-save.
+    backend.writeHook = (store, op, value) =>
+      store === 'columns' && op === 'put' && (value as { columnId: string }).columnId === 'j'
+        ? new DOMException('no room', 'QuotaExceededError')
+        : null
+
+    await expect(settlesWithin(db.saveDataset(m, [num([5, 6]), num([7, 8])]))).rejects.toThrow(/^QUOTA_EXCEEDED/)
+
+    backend.writeHook = null
+    expect((await db.listViews('ds')).map((v) => v.id)).toEqual(['v1'])
   })
 
   /** Regression: a dropped column used to linger in storage forever. */
