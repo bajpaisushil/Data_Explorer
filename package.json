@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Million-row data explorer that runs entirely in the browser. Your data never leaves your machine.",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

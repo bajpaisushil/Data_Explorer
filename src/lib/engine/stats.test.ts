@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildChart, computeProfiles, computeStats, niceBins, quantileSorted } from './stats'
 import type { Dataset } from './query'
 import type {
+  AggFn,
   BoolStats,
   CategoricalStats,
   ChartSpec,
