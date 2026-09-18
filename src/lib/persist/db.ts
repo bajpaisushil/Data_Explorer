@@ -175,6 +175,24 @@ function deserializeColumn(record: StoredColumn): ColumnData {
 
 /* ---------------------------------------------------------------- datasets */
 
+/**
+ * Drops column records belonging to this dataset that are no longer part of it.
+ * Without this a re-save that removed a column leaves the old record behind
+ * forever, quietly inflating what the storage panel reports as used.
+ */
+async function pruneColumns(db: IDBDatabase, datasetId: string, keep: Set<string>): Promise<void> {
+  const tx = db.transaction(STORE_COLUMNS, 'readwrite')
+  const request = tx.objectStore(STORE_COLUMNS).index('datasetId').openCursor(IDBKeyRange.only(datasetId))
+  request.onsuccess = () => {
+    const cursor = request.result
+    if (!cursor) return
+    const record = cursor.value as StoredColumn
+    if (!keep.has(record.columnId)) cursor.delete()
+    cursor.continue()
+  }
+  await commit(tx)
+}
+
 export async function saveDataset(
   meta: DatasetMeta,
   columns: ColumnData[],
@@ -183,7 +201,22 @@ export async function saveDataset(
   const db = await openDb()
   let bytes = 0
 
-  {
+  try {
+    // Columns are written first and the header last, so a run that dies partway
+    // can never leave a dataset listed that has nothing behind it to open.
+    // One transaction per column also keeps each write short and progress real.
+    for (let i = 0; i < meta.columns.length; i++) {
+      const record = serializeColumn(meta.id, meta.columns[i].id, columns[i])
+      for (const buf of Object.values(record.buffers)) bytes += buf.byteLength
+
+      const tx = db.transaction(STORE_COLUMNS, 'readwrite')
+      tx.objectStore(STORE_COLUMNS).put(record)
+      await commit(tx)
+      onProgress?.((i + 1) / (meta.columns.length + 1))
+    }
+
+    await pruneColumns(db, meta.id, new Set(meta.columns.map((c) => c.id)))
+
     const tx = db.transaction(STORE_DATASETS, 'readwrite')
     tx.objectStore(STORE_DATASETS).put({
       id: meta.id,
@@ -194,17 +227,14 @@ export async function saveDataset(
       meta,
     })
     await commit(tx)
-  }
-
-  // One transaction per column keeps each write short and progress meaningful.
-  for (let i = 0; i < meta.columns.length; i++) {
-    const record = serializeColumn(meta.id, meta.columns[i].id, columns[i])
-    for (const buf of Object.values(record.buffers)) bytes += buf.byteLength
-
-    const tx = db.transaction(STORE_COLUMNS, 'readwrite')
-    tx.objectStore(STORE_COLUMNS).put(record)
-    await commit(tx)
-    onProgress?.((i + 1) / meta.columns.length)
+    onProgress?.(1)
+  } catch (err) {
+    // Leave nothing half-written. A partial dataset cannot be opened, yet still
+    // occupies the quota whose exhaustion usually caused the failure. This does
+    // mean a failed re-save loses the previous copy; the alternative is writing
+    // a second copy alongside the first, which needs the room we just ran out of.
+    await deleteDataset(meta.id).catch(() => {})
+    throw err
   }
 
   return { datasetId: meta.id, bytes }

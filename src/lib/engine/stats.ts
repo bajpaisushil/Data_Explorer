@@ -347,6 +347,22 @@ function countStringNulls(col: ColumnData, sel: Uint32Array): number {
   return nulls
 }
 
+/**
+ * Folds a bin series down to at most `max` buckets by summing adjacent groups.
+ * Slicing would be wrong: the binner may return more bins than asked for, and
+ * cutting the tail makes a sparkline that silently omits the largest values.
+ * Condensing keeps the shape and, crucially, keeps the total.
+ */
+function condense(values: number[], max: number): number[] {
+  if (values.length <= max) return values
+  const out = new Array<number>(max).fill(0)
+  for (let i = 0; i < values.length; i++) {
+    const bucket = Math.min(max - 1, Math.floor((i / values.length) * max))
+    out[bucket] += values[i]
+  }
+  return out
+}
+
 function boolStats(col: ColumnData, sel: Uint32Array): BoolStats {
   let trueCount = 0
   let falseCount = 0
@@ -442,7 +458,7 @@ export function computeProfiles(
       columnId,
       stats: computeStatsCheap(meta.kind, nulls, sel.length),
       completeness: (sel.length - nulls) / total,
-      spark: spark.slice(0, SPARK_BINS),
+      spark: condense(spark, SPARK_BINS),
     })
   }
 
