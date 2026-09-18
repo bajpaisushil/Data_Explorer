@@ -23,6 +23,7 @@ import {
 import { buildChart, computeProfiles, computeStats } from './stats'
 import { generateSampleCsv } from '@/lib/sample'
 import {
+  clearAll,
   deleteDataset,
   deleteView,
   estimateQuota,
@@ -260,6 +261,27 @@ async function handle(id: number, req: Req): Promise<unknown> {
 
     case 'memoryReport':
       return memoryReport()
+
+    case 'storageReport': {
+      if (!isPersistenceAvailable()) {
+        return { available: false, usage: 0, quota: 0, datasetBytes: 0, datasets: [], views: 0 }
+      }
+      const datasets = await listDatasets()
+      const quota = await estimateQuota()
+      let views = 0
+      for (const d of datasets) views += (await listViews(d.id)).length
+      return {
+        available: true,
+        usage: quota?.usage ?? 0,
+        quota: quota?.quota ?? 0,
+        datasetBytes: datasets.reduce((sum, d) => sum + d.bytes, 0),
+        datasets,
+        views,
+      }
+    }
+
+    case 'clearStorage':
+      return await clearAll()
 
     case 'dispose':
       dataset = null

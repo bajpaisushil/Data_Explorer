@@ -189,13 +189,16 @@ function FilterComposer({ columns, onDone }: { columns: ColumnMeta[]; onDone: ()
   const [value, setValue] = useState('')
   const [value2, setValue2] = useState('')
   const [picked, setPicked] = useState<string[]>([])
+  const [lastColumnId, setLastColumnId] = useState(columnId)
 
-  useEffect(() => {
+  // Switching column invalidates the operator and operands.
+  if (columnId !== lastColumnId) {
+    setLastColumnId(columnId)
     setOp(ops[0])
     setValue('')
     setValue2('')
     setPicked([])
-  }, [ops])
+  }
 
   if (!column) return null
 
@@ -283,28 +286,28 @@ function ValuePicker({
   picked: string[]
   onChange: (next: string[]) => void
 }) {
-  const [values, setValues] = useState<ValueCount[]>([])
   const [term, setTerm] = useState('')
-  const [loading, setLoading] = useState(true)
+  // Results are tagged with the request they answer, so "loading" is derived
+  // rather than a second piece of state that can drift out of sync.
+  const requestKey = `${columnId}\u0000${term}`
+  const [data, setData] = useState<{ key: string; values: ValueCount[] }>({ key: '', values: [] })
+  const loading = data.key !== requestKey
+  const values = data.values
 
   useEffect(() => {
     let live = true
-    setLoading(true)
     getEngine()
       .request({ kind: 'distinct', columnId, limit: 200, search: term, global: true })
       .then((v) => {
-        if (live) setValues(v)
+        if (live) setData({ key: requestKey, values: v })
       })
       .catch(() => {
-        if (live) setValues([])
-      })
-      .finally(() => {
-        if (live) setLoading(false)
+        if (live) setData({ key: requestKey, values: [] })
       })
     return () => {
       live = false
     }
-  }, [columnId, term])
+  }, [columnId, term, requestKey])
 
   const toggle = (v: string) =>
     onChange(picked.includes(v) ? picked.filter((p) => p !== v) : [...picked, v])

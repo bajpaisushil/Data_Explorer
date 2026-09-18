@@ -121,20 +121,26 @@ function ColumnCard({
 }
 
 function ColumnDetail({ column }: { column: ColumnMeta }) {
-  const [stats, setStats] = useState<ColumnStats | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Tagged with the column id, so a response for a previously expanded column
+  // can never be shown against this one.
+  const [result, setResult] = useState<{ id: string; stats: ColumnStats | null; error: string | null }>({
+    id: '',
+    stats: null,
+    error: null,
+  })
+  const fresh = result.id === column.id
+  const stats = fresh ? result.stats : null
+  const error = fresh ? result.error : null
 
   useEffect(() => {
     let live = true
-    setStats(null)
-    setError(null)
     getEngine()
       .request({ kind: 'stats', columnId: column.id })
       .then((s) => {
-        if (live) setStats(s)
+        if (live) setResult({ id: column.id, stats: s, error: null })
       })
       .catch((e: Error) => {
-        if (live) setError(e.message)
+        if (live) setResult({ id: column.id, stats: null, error: e.message })
       })
     return () => {
       live = false
@@ -154,49 +160,62 @@ function ColumnDetail({ column }: { column: ColumnMeta }) {
 
   const isDate = column.kind === 'date'
   const num = (v: number) => (isDate ? formatDate(v) : formatNumber(v, { maxFrac: 4 }))
+  const shell = 'df-in grid grid-cols-2 gap-x-3 gap-y-1.5 px-3 pb-3.5 text-2xs'
+
+  // Discriminants are checked positively. QuantitativeStats carries a union
+  // kind ('numeric' | 'date'), and TypeScript will not subtract a constituent
+  // whose discriminant is itself a union, so testing for it last is what keeps
+  // every branch correctly narrowed.
+  if (stats.kind === 'categorical') {
+    return (
+      <dl className={shell}>
+        <Row label="Distinct" value={stats.distinct < 0 ? 'many' : formatCount(stats.distinct)} />
+        <Row label="Nulls" value={formatCount(stats.nulls)} />
+        <Row label="Empty" value={formatCount(stats.emptyCount)} />
+        <Row label="Avg length" value={formatNumber(stats.avgLength, { maxFrac: 1 })} />
+        <div className="col-span-2 mt-1 space-y-1">
+          <p className="text-2xs font-semibold text-ink-3 uppercase">Most common</p>
+          {stats.top.slice(0, 8).map((t, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-ink-1" title={t.value ?? 'null'}>
+                {t.value === null ? (
+                  <em className="text-ink-3">null</em>
+                ) : (
+                  t.value || <em className="text-ink-3">empty</em>
+                )}
+              </span>
+              <span className="tnum text-ink-3">{formatCompact(t.count)}</span>
+            </div>
+          ))}
+        </div>
+      </dl>
+    )
+  }
+
+  if (stats.kind === 'bool') {
+    return (
+      <dl className={shell}>
+        <Row label="True" value={formatCount(stats.trueCount)} />
+        <Row label="False" value={formatCount(stats.falseCount)} />
+        <Row label="Nulls" value={formatCount(stats.nulls)} />
+      </dl>
+    )
+  }
 
   return (
-    <dl className="df-in grid grid-cols-2 gap-x-3 gap-y-1.5 px-3 pb-3.5 text-2xs">
-      {stats.kind === 'numeric' || stats.kind === 'date' ? (
-        <>
-          <Row label="Min" value={num(stats.min)} />
-          <Row label="Max" value={num(stats.max)} />
-          <Row label="Mean" value={num(stats.mean)} />
-          <Row label="Median" value={num(stats.median)} />
-          <Row label="p25" value={num(stats.p25)} />
-          <Row label="p75" value={num(stats.p75)} />
-          <Row label="p95" value={num(stats.p95)} />
-          <Row label="Std dev" value={formatNumber(stats.stdev, { maxFrac: 4 })} />
-          {!isDate && <Row label="Sum" value={formatCompact(stats.sum)} />}
-          <Row label="Outliers" value={formatCount(stats.outlierCount)} />
-          <Row label="Nulls" value={formatCount(stats.nulls)} />
-          <Row label="Distinct" value={stats.distinct < 0 ? 'many' : formatCount(stats.distinct)} />
-        </>
-      ) : stats.kind === 'bool' ? (
-        <>
-          <Row label="True" value={formatCount(stats.trueCount)} />
-          <Row label="False" value={formatCount(stats.falseCount)} />
-          <Row label="Nulls" value={formatCount(stats.nulls)} />
-        </>
-      ) : (
-        <>
-          <Row label="Distinct" value={stats.distinct < 0 ? 'many' : formatCount(stats.distinct)} />
-          <Row label="Nulls" value={formatCount(stats.nulls)} />
-          <Row label="Empty" value={formatCount(stats.emptyCount)} />
-          <Row label="Avg length" value={formatNumber(stats.avgLength, { maxFrac: 1 })} />
-          <div className="col-span-2 mt-1 space-y-1">
-            <p className="text-2xs font-semibold text-ink-3 uppercase">Most common</p>
-            {stats.top.slice(0, 8).map((t, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-ink-1" title={t.value ?? 'null'}>
-                  {t.value === null ? <em className="text-ink-3">null</em> : t.value || <em className="text-ink-3">empty</em>}
-                </span>
-                <span className="tnum text-ink-3">{formatCompact(t.count)}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+    <dl className={shell}>
+      <Row label="Min" value={num(stats.min)} />
+      <Row label="Max" value={num(stats.max)} />
+      <Row label="Mean" value={num(stats.mean)} />
+      <Row label="Median" value={num(stats.median)} />
+      <Row label="p25" value={num(stats.p25)} />
+      <Row label="p75" value={num(stats.p75)} />
+      <Row label="p95" value={num(stats.p95)} />
+      <Row label="Std dev" value={formatNumber(stats.stdev, { maxFrac: 4 })} />
+      {!isDate && <Row label="Sum" value={formatCompact(stats.sum)} />}
+      <Row label="Outliers" value={formatCount(stats.outlierCount)} />
+      <Row label="Nulls" value={formatCount(stats.nulls)} />
+      <Row label="Distinct" value={stats.distinct < 0 ? 'many' : formatCount(stats.distinct)} />
     </dl>
   )
 }

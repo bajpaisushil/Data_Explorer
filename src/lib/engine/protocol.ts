@@ -57,9 +57,24 @@ export type Req =
   | { kind: 'listViews'; datasetId: string }
   | { kind: 'deleteView'; viewId: string }
   | { kind: 'memoryReport' }
+  | { kind: 'storageReport' }
+  | { kind: 'clearStorage' }
   | { kind: 'dispose' }
 
 /* -------------------------------------------------------------- responses */
+
+export interface StorageReport {
+  /** Whether IndexedDB is usable at all in this context. */
+  available: boolean
+  /** Bytes this origin is using, per the browser's own estimate. */
+  usage: number
+  /** Bytes the browser is willing to give this origin. */
+  quota: number
+  /** Bytes attributable to datasets DataForge saved. */
+  datasetBytes: number
+  datasets: { id: string; name: string; rowCount: number; createdAt: number; bytes: number }[]
+  views: number
+}
 
 export interface MemoryReport {
   rowCount: number
@@ -90,6 +105,8 @@ export interface ResMap {
   listViews: SavedView[]
   deleteView: { ok: true }
   memoryReport: MemoryReport
+  storageReport: StorageReport
+  clearStorage: { datasets: number }
   dispose: { ok: true }
 }
 

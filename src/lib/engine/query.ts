@@ -500,6 +500,19 @@ function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+/**
+ * Sorting text is case-insensitive, so "apple" and "Apple" land together the
+ * way people expect from a spreadsheet, with an exact comparison as the
+ * tie-break so the order is still total and deterministic.
+ */
+function cmpStrNatural(a: string, b: string): number {
+  const la = a.toLowerCase()
+  const lb = b.toLowerCase()
+  if (la < lb) return -1
+  if (la > lb) return 1
+  return cmpStr(a, b)
+}
+
 const rankCache = new WeakMap<string[], { len: number; ranks: Int32Array }>()
 
 /** code -> lexicographic rank, computed once per dictionary. */
@@ -509,7 +522,7 @@ function dictRanks(dictionary: string[]): Int32Array {
   const n = dictionary.length
   const order: number[] = new Array(n)
   for (let i = 0; i < n; i++) order[i] = i
-  order.sort((a, b) => cmpStr(dictionary[a], dictionary[b]))
+  order.sort((a, b) => cmpStrNatural(dictionary[a], dictionary[b]))
   const ranks = new Int32Array(n)
   for (let i = 0; i < n; i++) ranks[order[i]] = i
   rankCache.set(dictionary, { len: n, ranks })
@@ -662,7 +675,17 @@ function smallIntRanks(col: ColumnData, sel: Uint32Array): { ranks: Int32Array; 
   return null
 }
 
-/** UTF-8 byte order equals code point order, so raw spans sort correctly. */
+/** ASCII upper -> lower, so byte comparison can be case-insensitive. */
+function fold(byte: number): number {
+  return byte >= 65 && byte <= 90 ? byte + 32 : byte
+}
+
+/**
+ * UTF-8 byte order equals code point order, so raw spans sort correctly. ASCII
+ * case is folded first to match the dictionary path's case-insensitive order —
+ * otherwise the same column would sort differently depending only on whether
+ * its cardinality put it in dict or blob storage. Exact bytes break ties.
+ */
 function cmpSpans(col: BlobColumn, ra: number, rb: number): number {
   const b = col.bytes
   const o = col.offsets
@@ -670,15 +693,23 @@ function cmpSpans(col: BlobColumn, ra: number, rb: number): number {
   const ae = o[ra + 1]
   const bs = o[rb]
   const be = o[rb + 1]
+
   let i = as
   let j = bs
   while (i < ae && j < be) {
-    const d = b[i++] - b[j++]
+    const d = fold(b[i++]) - fold(b[j++])
     if (d !== 0) return d < 0 ? -1 : 1
   }
   const la = ae - as
   const lb = be - bs
-  return la === lb ? 0 : la < lb ? -1 : 1
+  if (la !== lb) return la < lb ? -1 : 1
+
+  // Case-insensitively equal: fall back to exact bytes for a total order.
+  for (let k = 0; k < la; k++) {
+    const d = b[as + k] - b[bs + k]
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return 0
 }
 
 export function sortSelection(ds: Dataset, sel: Uint32Array, sorts: SortSpec[]): Uint32Array {
@@ -817,7 +848,6 @@ interface AggState {
   nulls: Float64Array | null
   sets: (Set<number | string> | null)[] | null
   med: MedianBuf | null
-  capped: boolean
 }
 
 function aggValue(st: AggState, row: number): number {
@@ -902,7 +932,6 @@ export function groupAggregate(ds: Dataset, sel: Uint32Array, spec: GroupSpec): 
       nulls: null,
       sets: null,
       med: null,
-      capped: false,
     }
     switch (a.fn) {
       case 'sum':
@@ -988,15 +1017,20 @@ export function groupAggregate(ds: Dataset, sel: Uint32Array, spec: GroupSpec): 
         slot = hit
       }
     } else {
+      // Length-prefixed parts, so no value can forge a key boundary. '~' marks a
+      // null; neither a length nor a number literal can start with it.
       let key = ''
       for (let k = 0; k < present.length; k++) {
-        if (k > 0) key += ''
         const c = present[k]
         if (c.kind === 'string') {
           const s = readString(c, row)
-          key += s === null ? ' ' : s
+          key += s === null ? '~' : s.length + ':' + s
+        } else if (c.kind === 'bool') {
+          const v = c.values[row]
+          key += v === 2 ? '~' : v + ':'
         } else {
-          key += c.values[row]
+          const v = c.values[row]
+          key += v !== v ? '~' : v + ':'
         }
       }
       const hit = strMap.get(key)
@@ -1082,10 +1116,7 @@ export function groupAggregate(ds: Dataset, sel: Uint32Array, spec: GroupSpec): 
             set = new Set<number | string>()
             sets[slot] = set
           }
-          if (set.size >= DISTINCT_CAP) {
-            st.capped = true
-            break
-          }
+          if (set.size >= DISTINCT_CAP) break // saturates at the cap
           if (col.kind === 'string') {
             if (col.encoding === 'dict') {
               const c = col.codes[row]
@@ -1317,9 +1348,10 @@ export function extent(ds: Dataset, columnId: string): { min: number; max: numbe
   const col = colOf(ds, columnId)
   if (col === null || col.kind === 'string' || col.kind === 'bool') return { min: NaN, max: NaN }
   const v = col.values
+  const n = Math.min(v.length, ds.meta.rowCount)
   let mn = Infinity
   let mx = -Infinity
-  for (let i = 0; i < v.length; i++) {
+  for (let i = 0; i < n; i++) {
     const x = v[i]
     if (x !== x) continue
     if (x < mn) mn = x

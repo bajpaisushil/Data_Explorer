@@ -13,7 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Pill, ProgressBar } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Field'
 import { SAMPLE_PRESETS } from '@/lib/sample'
-import { formatBytes, formatCount } from '@/lib/format'
+import { getEngine } from '@/lib/engine/client'
+import type { StorageReport } from '@/lib/engine/protocol'
+import { formatBytes, formatCount, formatPercent } from '@/lib/format'
 import { useStore } from '@/lib/state/store'
 
 const ROW_CHOICES = [10_000, 100_000, 500_000, 1_000_000, 2_000_000]
@@ -35,14 +37,24 @@ export function Dropzone() {
   const openStored = useStore((s) => s.openStoredDataset)
   const deleteStored = useStore((s) => s.deleteStoredDataset)
 
+  const [storage, setStorage] = useState<StorageReport | null>(null)
+  const [clearing, setClearing] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [rows, setRows] = useState(1_000_000)
   const inputRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
 
+  const loadStorage = useCallback(() => {
+    getEngine()
+      .request({ kind: 'storageReport' })
+      .then(setStorage)
+      .catch(() => setStorage(null))
+  }, [])
+
   useEffect(() => {
     void refreshStored()
-  }, [refreshStored])
+    loadStorage()
+  }, [refreshStored, loadStorage])
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -201,10 +213,38 @@ export function Dropzone() {
 
       {storedDatasets.length > 0 && (
         <section className="w-full space-y-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-1">
-            <HardDriveDownload size={15} className="text-accent" />
-            Saved in this browser
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-1">
+              <HardDriveDownload size={15} className="text-accent" />
+              Saved in this browser
+            </h2>
+            <div className="flex items-center gap-2">
+              {storage && storage.available && (
+                <span className="tnum text-2xs text-ink-3">
+                  {formatBytes(storage.usage)} used
+                  {storage.quota > 0 && ` of ${formatBytes(storage.quota)} (${formatPercent(storage.usage / storage.quota, 1)})`}
+                </span>
+              )}
+              <Button
+                size="xs"
+                variant="soft"
+                icon={<Trash2 size={12} />}
+                disabled={clearing}
+                onClick={async () => {
+                  setClearing(true)
+                  try {
+                    await getEngine().request({ kind: 'clearStorage' })
+                    await refreshStored()
+                    loadStorage()
+                  } finally {
+                    setClearing(false)
+                  }
+                }}
+              >
+                {clearing ? 'Clearing…' : 'Clear all'}
+              </Button>
+            </div>
+          </div>
           <ul className="space-y-2">
             {storedDatasets.map((d) => (
               <li key={d.id} className="df-card flex items-center gap-3 px-4 py-3">
@@ -226,7 +266,10 @@ export function Dropzone() {
                   size="xs"
                   icon={<Trash2 size={13} />}
                   aria-label={`Delete ${d.name}`}
-                  onClick={() => void deleteStored(d.id)}
+                  onClick={async () => {
+                    await deleteStored(d.id)
+                    loadStorage()
+                  }}
                 >
                   Delete
                 </Button>

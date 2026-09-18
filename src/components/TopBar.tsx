@@ -34,12 +34,18 @@ export function TopBar() {
   const persistDataset = useStore((s) => s.persistDataset)
   const persisting = useStore((s) => s.persisting)
 
-  const [term, setTerm] = useState(search?.term ?? '')
+  const storeTerm = search?.term ?? ''
+  const [term, setTerm] = useState(storeTerm)
+  const [syncedTerm, setSyncedTerm] = useState(storeTerm)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    setTerm(search?.term ?? '')
-  }, [search?.term])
+  // The store can change the term without us typing — applying a saved view,
+  // or clearing all filters. Adjusting during render is React's documented
+  // way to mirror that, and avoids the extra pass an effect would cost.
+  if (storeTerm !== syncedTerm) {
+    setSyncedTerm(storeTerm)
+    setTerm(storeTerm)
+  }
 
   // "/" focuses search, the way every data tool people already know does it.
   useEffect(() => {
@@ -197,7 +203,7 @@ export function TopBar() {
                 {persisting ? 'Saving…' : 'Save to this browser'}
               </MenuItem>
               <MenuItem icon={<Database size={13} />} onClick={() => { close(); setPanel('memory') }}>
-                Memory report
+                Memory &amp; storage
               </MenuItem>
               <MenuSeparator />
               <MenuItem
